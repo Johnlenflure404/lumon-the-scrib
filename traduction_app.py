@@ -113,6 +113,115 @@ _EN_TARGET_NAMES = {
 
 
 # ──────────────────────────────────────────────
+# Extraction heuristique de noms propres (Fix #7)
+# ──────────────────────────────────────────────
+
+# Regex pour noms propres latins : mot(s) commençant par majuscule
+# Accepte : NomSimple, Nom Composé, OpenAI, NASA, GPT-4
+_PROPER_NOUN_RE = re.compile(
+    r"\b([A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-Þà-ÿ\-]*(?:\s+[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-Þà-ÿ\-]*)*)\b"
+)
+
+# Mots courants à ignorer (articles, prépositions, etc.)
+_STOP_WORDS = {
+    # Anglais
+    "The", "This", "That", "These", "Those", "There", "Then", "They",
+    "Their", "Here", "Where", "When", "What", "Which", "With", "From",
+    "Into", "About", "After", "Before", "During", "Between", "Under",
+    "Above", "Below", "Each", "Every", "Some", "Many", "Much", "Most",
+    "Other", "Another", "Such", "Only", "Also", "Just", "Very", "More",
+    "Less", "However", "Therefore", "Furthermore", "Moreover", "Although",
+    "Because", "Since", "While", "Until", "Unless", "Though", "Still",
+    "Yet", "But", "And", "Not", "For", "All", "Any", "How", "Why",
+    "Are", "Was", "Were", "Been", "Being", "Have", "Has", "Had",
+    "Will", "Would", "Could", "Should", "May", "Might", "Must",
+    "Can", "Shall", "Does", "Did", "Its", "Our", "His", "Her",
+    # Français
+    "Les", "Des", "Une", "Aux", "Par", "Sur", "Dans", "Pour",
+    "Avec", "Sans", "Sous", "Vers", "Chez", "Entre", "Comme",
+    "Mais", "Donc", "Car", "Puis", "Ici", "Cet", "Cette",
+    "Sont", "Est", "Ont", "Qui", "Que", "Quoi",
+    # Communs
+    "Note", "See", "New", "Old", "Table", "Figure", "Section",
+    "Chapter", "Part", "Step", "Example", "Data", "Type",
+}
+
+
+def extract_proper_nouns(text: str) -> set[str]:
+    """
+    Extrait les noms propres probables d'un texte latin.
+    Ignore les mots en début de phrase et les stop words.
+    """
+    candidates: set[str] = set()
+    # Découper en phrases pour ignorer le premier mot de chaque phrase
+    sentences = re.split(r"(?<=[.!?。！？])\s+", text)
+    for sentence in sentences:
+        words = sentence.split()
+        if len(words) < 2:
+            continue
+        # Chercher dans toute la phrase sauf le premier mot
+        search_text = " ".join(words[1:])
+        for match in _PROPER_NOUN_RE.finditer(search_text):
+            candidate = match.group(1)
+            # Filtrer les stop words et les mots trop courts
+            if candidate not in _STOP_WORDS and len(candidate) > 1:
+                candidates.add(candidate)
+    return candidates
+
+
+def align_glossary_from_chunks(
+    source_text: str,
+    translated_text: str,
+    existing_glossary: dict[str, str],
+) -> dict[str, str]:
+    """
+    Met à jour le glossaire en détectant les noms propres dans le source
+    et en les alignant avec la traduction.
+
+    Heuristique : si un nom propre du source apparaît tel quel dans la
+    traduction, on le conserve (translittération). Sinon, on ne l'ajoute
+    pas automatiquement (trop risqué sans alignement mot-à-mot).
+    """
+    source_nouns = extract_proper_nouns(source_text)
+    for noun in source_nouns:
+        if noun in existing_glossary:
+            continue
+        # Si le nom apparaît tel quel dans la traduction → conservé
+        if noun in translated_text:
+            existing_glossary[noun] = noun
+        else:
+            # Chercher une version potentiellement différente
+            # (ex: "Tokyo" → "東京"). Pour l'instant on ne fait pas
+            # d'alignement complexe — le glossaire manuel couvre ce cas.
+            pass
+    return existing_glossary
+
+
+def parse_manual_glossary(text: str) -> dict[str, str]:
+    """
+    Parse un glossaire saisi manuellement.
+    Format attendu : une entrée par ligne, séparée par → ou ->
+    Ex: "Tokyo → 東京"
+    """
+    glossary: dict[str, str] = {}
+    for line in text.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # Accepter → ou ->
+        for sep in ("→", "->"):
+            if sep in line:
+                parts = line.split(sep, 1)
+                if len(parts) == 2:
+                    src = parts[0].strip()
+                    tgt = parts[1].strip()
+                    if src and tgt:
+                        glossary[src] = tgt
+                break
+    return glossary
+
+
+# ──────────────────────────────────────────────
 # Construction du prompt HY-MT
 # ──────────────────────────────────────────────
 
@@ -121,14 +230,46 @@ def _is_zh_involved(src_lang: str, tgt_lang: str) -> bool:
     return src_lang in ("zh", "zh-Hant") or tgt_lang in ("zh", "zh-Hant")
 
 
-def build_prompt(source_text: str, src_lang: str, tgt_lang: str) -> str:
+def _filter_glossary_for_chunk(
+    glossary: dict[str, str], source_text: str,
+) -> dict[str, str]:
+    """Ne garde que les entrées du glossaire présentes dans le chunk source."""
+    return {
+        src: tgt for src, tgt in glossary.items()
+        if src in source_text
+    }
+
+
+def build_prompt(
+    source_text: str,
+    src_lang: str,
+    tgt_lang: str,
+    glossary: dict[str, str] | None = None,
+) -> str:
     """
     Construit le prompt conformément aux templates HY-MT.
     - ZH<=>XX : prompt en chinois
     - XX<=>XX (sans chinois) : prompt en anglais
+    - Si glossaire fourni : utilise le template d'intervention terminologique
     """
+    # Filtrer le glossaire pour ne garder que les termes du chunk
+    active_glossary = {}
+    if glossary:
+        active_glossary = _filter_glossary_for_chunk(glossary, source_text)
+
     if _is_zh_involved(src_lang, tgt_lang):
         target_name = _ZH_TARGET_NAMES.get(tgt_lang, tgt_lang)
+        if active_glossary:
+            # Template terminologique HY-MT (doc officielle)
+            entries = "\n".join(
+                f"{src} 翻译成 {tgt}" for src, tgt in active_glossary.items()
+            )
+            return (
+                f"参考下面的翻译：\n{entries}\n\n"
+                f"将以下文本翻译为{target_name}，"
+                f"注意只需要输出翻译后的结果，不要额外解释：\n"
+                f"{source_text}"
+            )
         return (
             f"将以下文本翻译为{target_name}，"
             f"注意只需要输出翻译后的结果，不要额外解释：\n\n"
@@ -136,6 +277,16 @@ def build_prompt(source_text: str, src_lang: str, tgt_lang: str) -> str:
         )
     else:
         target_name = _EN_TARGET_NAMES.get(tgt_lang, tgt_lang)
+        if active_glossary:
+            entries = "\n".join(
+                f"{src} → {tgt}" for src, tgt in active_glossary.items()
+            )
+            return (
+                f"Refer to the following translations:\n{entries}\n\n"
+                f"Translate the following segment into {target_name}, "
+                f"without additional explanation.\n\n"
+                f"{source_text}"
+            )
         return (
             f"Translate the following segment into {target_name}, "
             f"without additional explanation.\n\n"
@@ -172,6 +323,8 @@ def translate_chunk_stream(
     repetition_penalty: float,
     max_tokens: int,
     timeout: int,
+    backend_name: str = "LM Studio",
+    glossary: dict[str, str] | None = None,
 ) -> str:
     """
     Traduit un bloc de texte via l'API /v1/chat/completions en mode streaming.
@@ -182,8 +335,12 @@ def translate_chunk_stream(
     Le décodage UTF-8 est forcé manuellement pour éviter les artefacts
     d'encodage (ex. 脙漏 au lieu de é) causés par le décodage ISO-8859-1
     par défaut de la bibliothèque requests.
+
+    Le payload est adapté selon le backend :
+    - LM Studio : top_k et repetition_penalty en racine
+    - Ollama : top_k et repeat_penalty dans un objet "options"
     """
-    prompt = build_prompt(text, src_lang, tgt_lang)
+    prompt = build_prompt(text, src_lang, tgt_lang, glossary)
 
     # HY-MT n'utilise pas de system prompt par défaut
     messages = [{"role": "user", "content": prompt}]
@@ -192,12 +349,22 @@ def translate_chunk_stream(
         "model": model,
         "messages": messages,
         "temperature": temperature,
-        "top_k": top_k,
         "top_p": top_p,
-        "repetition_penalty": repetition_penalty,
         "max_tokens": max_tokens,
         "stream": True,
     }
+
+    # ── Fix #6 : Adapter le payload selon le backend ──
+    if backend_name == "Ollama":
+        # Ollama attend top_k et repeat_penalty dans "options"
+        payload["options"] = {
+            "top_k": top_k,
+            "repeat_penalty": repetition_penalty,
+        }
+    else:
+        # LM Studio / OpenAI-compatible : paramètres en racine
+        payload["top_k"] = top_k
+        payload["repetition_penalty"] = repetition_penalty
 
     # En-têtes explicites pour forcer UTF-8 côté serveur et côté client
     headers = {
@@ -251,6 +418,8 @@ def translate_with_retry(
     repetition_penalty: float,
     max_tokens: int,
     timeout: int,
+    backend_name: str = "LM Studio",
+    glossary: dict[str, str] | None = None,
     max_retries: int = MAX_RETRIES,
 ) -> str | None:
     """Tente la traduction avec retry et backoff exponentiel."""
@@ -259,7 +428,7 @@ def translate_with_retry(
             return translate_chunk_stream(
                 text, base_url, model, src_lang, tgt_lang,
                 temperature, top_k, top_p, repetition_penalty,
-                max_tokens, timeout,
+                max_tokens, timeout, backend_name, glossary,
             )
         except Exception as e:
             if attempt < max_retries - 1:
@@ -271,65 +440,201 @@ def translate_with_retry(
 
 
 # ──────────────────────────────────────────────
-# Découpage intelligent du Markdown
+# Découpage intelligent du Markdown (Fix #1 + #2)
+# ──────────────────────────────────────────────
+# State machine remplaçant la regex fragile.
+# Chaque segment est un tuple (type, contenu) :
+#   - ("code", "```py\nprint()\n```")
+#   - ("front_matter", "---\ntitle: X\n---")
+#   - ("text", "paragraphe normal")
+#   - ("sep", "\n\n")  ← séparateur original conservé (Fix #2)
 # ──────────────────────────────────────────────
 
-_CODE_FENCE_RE = re.compile(r"^(`{3,}|~{3,})", re.MULTILINE)
 _FRONT_MATTER_RE = re.compile(r"\A---\n.*?\n---\n", re.DOTALL)
+_FENCE_OPEN_RE = re.compile(r"^(`{3,}|~{3,})(.*)$")
+_TABLE_LINE_RE = re.compile(r"^\s*\|.+\|\s*$")
+_TABLE_SEP_RE = re.compile(r"^\s*\|[\s:|-]+\|\s*$")
 
 
-def _split_preserving_blocks(text: str) -> list[str]:
+def _split_preserving_blocks(text: str) -> list[tuple[str, str]]:
     """
-    Découpe le texte en segments en préservant les blocs spéciaux
-    (code fences, front matter) comme unités atomiques.
+    Découpe le texte en segments typés (type, contenu) via une state machine
+    ligne par ligne. Gère correctement :
+    - Les code fences avec info-string (```python)
+    - Les fences imbriquées (fermeture uniquement si même char et >= même longueur)
+    - Les backticks inline dans les tableaux (ne déclenchent pas de fence)
+    - Les tableaux Markdown comme blocs atomiques (jamais découpés)
+    - Préservation des séparateurs originaux (\n\n, \n)
     """
-    segments: list[str] = []
+    segments: list[tuple[str, str]] = []
 
-    # Extraire le front matter s'il existe
+    # ── Extraire le front matter s'il existe ──
     fm_match = _FRONT_MATTER_RE.match(text)
     if fm_match:
-        segments.append(fm_match.group(0))
+        segments.append(("front_matter", fm_match.group(0)))
         text = text[fm_match.end():]
 
-    # Découper autour des code fences
-    parts = re.split(
-        r"(^`{3,}.*?^`{3,}.*?$|^~{3,}.*?^~{3,}.*?$)",
-        text, flags=re.MULTILINE | re.DOTALL,
-    )
+    # ── State machine ──
+    lines = text.split("\n")
+    in_fence = False
+    in_table = False
+    fence_char = ""
+    fence_len = 0
+    current_block: list[str] = []
+    current_type = "text"
 
-    for part in parts:
-        if not part:
-            continue
-        if _CODE_FENCE_RE.match(part):
-            # Bloc de code → unité atomique (ne pas traduire)
-            segments.append(part)
+    def flush_block():
+        """Enregistre le bloc courant s'il n'est pas vide."""
+        if current_block:
+            content = "\n".join(current_block)
+            if current_type == "text":
+                # Sous-découper le texte brut par doubles sauts de ligne
+                # tout en préservant les séparateurs originaux
+                sub_parts = re.split(r"(\n\s*\n)", content)
+                for sp in sub_parts:
+                    if not sp:
+                        continue
+                    if re.fullmatch(r"\n\s*\n", sp):
+                        segments.append(("sep", sp))
+                    else:
+                        segments.append(("text", sp))
+            else:
+                segments.append((current_type, content))
+            current_block.clear()
+
+    def flush_with_trailing_sep():
+        """
+        Flush le bloc courant en séparant les lignes vides de fin.
+        Les lignes vides trailing deviennent un segment 'sep' pour
+        préserver les séparateurs originaux (ex: \\n\\n avant un tableau).
+        """
+        # Compter les lignes vides à la fin du bloc
+        trailing_empty = 0
+        for line in reversed(current_block):
+            if line.strip() == "":
+                trailing_empty += 1
+            else:
+                break
+
+        if trailing_empty > 0 and trailing_empty < len(current_block):
+            # Séparer : le contenu textuel + le séparateur trailing
+            sep_lines = current_block[-trailing_empty:]
+            del current_block[-trailing_empty:]
+            flush_block()
+            # Émettre le séparateur : N lignes vides = N+1 newlines
+            # (chaque ligne vide = 1 \n entre les lignes du split,
+            #  + 1 \n pour la jonction vers la ligne suivante)
+            segments.append(("sep", "\n" * (trailing_empty + 1)))
         else:
-            # Découper par double saut de ligne (paragraphes)
-            paragraphs = re.split(r"(\n\s*\n)", part)
-            segments.extend(p for p in paragraphs if p)
+            flush_block()
+
+    for line in lines:
+        if in_fence:
+            # Vérifier si cette ligne ferme la fence actuelle
+            m = _FENCE_OPEN_RE.match(line.strip())
+            if m:
+                marker = m.group(1)
+                # Fermeture : même caractère, longueur >=, pas d'info-string
+                if (marker[0] == fence_char
+                        and len(marker) >= fence_len
+                        and not m.group(2).strip()):
+                    current_block.append(line)
+                    in_fence = False
+                    flush_block()
+                    current_type = "text"
+                    continue
+            current_block.append(line)
+
+        elif in_table:
+            # Continuer le tableau tant que les lignes sont des lignes |...|
+            if _TABLE_LINE_RE.match(line):
+                current_block.append(line)
+            else:
+                # Fin du tableau
+                in_table = False
+                flush_block()
+                current_type = "text"
+                # Émettre le \n entre la dernière ligne du tableau et cette ligne
+                # Si la ligne est vide, c'est le début d'un séparateur \n\n
+                if line.strip() == "":
+                    segments.append(("sep", "\n\n"))
+                else:
+                    segments.append(("sep", "\n"))
+                    current_block.append(line)
+
+        else:
+            # Vérifier si cette ligne ouvre une fence
+            stripped = line.strip()
+            m = _FENCE_OPEN_RE.match(stripped)
+            if m:
+                marker = m.group(1)
+                leading = line[:len(line) - len(line.lstrip())]
+                rest_of_line = line[len(leading):]
+                if rest_of_line.strip() == stripped and _FENCE_OPEN_RE.match(rest_of_line.strip()):
+                    flush_with_trailing_sep()
+                    in_fence = True
+                    fence_char = marker[0]
+                    fence_len = len(marker)
+                    current_type = "code"
+                    current_block.append(line)
+                    continue
+
+            # Vérifier si cette ligne commence un tableau
+            if _TABLE_LINE_RE.match(line) and not in_fence:
+                # Regarder si c'est un vrai tableau (header + separator)
+                # On commence à collecter et on validera au fur et à mesure
+                flush_with_trailing_sep()
+                in_table = True
+                current_type = "table"
+                current_block.append(line)
+                continue
+
+            current_block.append(line)
+
+    # Flush le dernier bloc
+    flush_block()
 
     return segments
 
 
-def split_markdown(text: str, max_tokens: int) -> list[str]:
+def split_markdown(text: str, max_tokens: int) -> list[tuple[str, str]]:
     """
     Découpe le document Markdown en chunks respectant la limite de tokens,
-    tout en préservant les blocs de code et le front matter.
-    Les blocs de code sont conservés tels quels (non traduits).
+    tout en préservant les blocs de code, le front matter, et les séparateurs.
+
+    Retourne une liste de (type, contenu) où type est :
+    - "code" : bloc de code (ne pas traduire)
+    - "front_matter" : front matter YAML (ne pas traduire)
+    - "text" : texte à traduire
+    - "sep" : séparateur original (ne pas traduire, conserver tel quel)
     """
     encoding = tiktoken.get_encoding(TIKTOKEN_ENCODING)
     segments = _split_preserving_blocks(text)
 
-    chunks: list[str] = []
+    chunks: list[tuple[str, str]] = []
     current_chunk = ""
     current_tokens = 0
+    current_type = "text"
 
-    for segment in segments:
+    for seg_type, segment in segments:
+        # Les blocs spéciaux (code, front_matter, sep, table) sont émis tels quels
+        # Note : "table" est traduit mais jamais découpé (atomique)
+        if seg_type in ("code", "front_matter", "sep", "table"):
+            if current_chunk:
+                chunks.append((current_type, current_chunk))
+                current_chunk = ""
+                current_tokens = 0
+            chunks.append((seg_type, segment))
+            current_type = "text"
+            continue
+
+        # Segment de texte : regrouper en respectant la limite
         seg_tokens = len(encoding.encode(segment))
 
         if seg_tokens > max_tokens:
+            # Segment trop gros → découper ligne par ligne
             if current_chunk:
-                chunks.append(current_chunk)
+                chunks.append((current_type, current_chunk))
                 current_chunk = ""
                 current_tokens = 0
 
@@ -341,32 +646,79 @@ def split_markdown(text: str, max_tokens: int) -> list[str]:
                     current_tokens += line_tokens
                 else:
                     if current_chunk:
-                        chunks.append(current_chunk)
+                        chunks.append(("text", current_chunk))
                     current_chunk = line
                     current_tokens = line_tokens
+            current_type = "text"
         elif current_tokens + seg_tokens <= max_tokens:
             current_chunk += segment
             current_tokens += seg_tokens
+            current_type = "text"
         else:
-            chunks.append(current_chunk)
+            chunks.append(("text", current_chunk))
             current_chunk = segment
             current_tokens = seg_tokens
+            current_type = "text"
 
     if current_chunk:
-        chunks.append(current_chunk)
+        chunks.append((current_type, current_chunk))
 
     return chunks
 
 
-def is_code_block(text: str) -> bool:
-    """Vérifie si un chunk est un bloc de code (ne doit pas être traduit)."""
-    stripped = text.strip()
-    return bool(_CODE_FENCE_RE.match(stripped))
+def is_translatable(chunk_type: str) -> bool:
+    """Vérifie si un chunk doit être traduit (texte brut + tableaux)."""
+    return chunk_type in ("text", "table")
 
 
-def is_front_matter(text: str) -> bool:
-    """Vérifie si un chunk est du front matter YAML (ne doit pas être traduit)."""
-    return text.strip().startswith("---") and text.strip().endswith("---")
+# ──────────────────────────────────────────────
+# Validation qualité des traductions (Fix #5)
+# ──────────────────────────────────────────────
+
+def validate_translation(original: str, translated: str) -> list[str]:
+    """
+    Retourne une liste de warnings (vide si OK).
+    Vérifie :
+      - Réponse vide ou quasi-vide
+      - Réponse qui semble tronquée (fin abrupte)
+      - Ratio de longueur suspect
+    """
+    warnings: list[str] = []
+    orig_len = len(original.strip())
+    trans_len = len(translated.strip())
+
+    if trans_len == 0:
+        warnings.append("⚠️ Réponse vide — le modèle n'a produit aucun texte.")
+        return warnings
+
+    if orig_len > 20 and trans_len < 5:
+        warnings.append("⚠️ Réponse quasi-vide — la traduction semble incomplète.")
+
+    # Ratio de longueur suspect (< 20% ou > 500%)
+    if orig_len > 0:
+        ratio = trans_len / orig_len
+        if ratio < 0.2:
+            warnings.append(
+                f"⚠️ Ratio de longueur très bas ({ratio:.0%}) — "
+                f"traduction potentiellement tronquée."
+            )
+        elif ratio > 5.0:
+            warnings.append(
+                f"⚠️ Ratio de longueur très élevé ({ratio:.0%}) — "
+                f"le modèle a peut-être halluciné du contenu."
+            )
+
+    # Fin abrupte : pas de ponctuation finale alors que l'original en a
+    final_punct = set(".!?。！？…」』\"')")
+    orig_ends_with_punct = original.strip()[-1] in final_punct if original.strip() else False
+    trans_ends_with_punct = translated.strip()[-1] in final_punct if translated.strip() else False
+    if orig_ends_with_punct and not trans_ends_with_punct and trans_len > 20:
+        warnings.append(
+            "⚠️ La traduction ne se termine pas par une ponctuation — "
+            "possible troncature (max_new_tokens atteint ?)."
+        )
+
+    return warnings
 
 
 # ──────────────────────────────────────────────
@@ -478,6 +830,25 @@ with st.sidebar:
         help="Temps max d'attente par bloc. Augmentez pour les très gros blocs.",
     )
 
+    # ── Fix #7 : Glossaire terminologique ──
+    st.divider()
+    st.subheader("📖 Glossaire")
+
+    glossary_enabled = st.toggle(
+        "Glossaire automatique",
+        value=True,
+        help=(
+            "Détecte automatiquement les noms propres et les injecte "
+            "dans les prompts suivants pour assurer la cohérence."
+        ),
+    )
+    manual_glossary_text = st.text_area(
+        "Glossaire personnalisé",
+        height=100,
+        placeholder="Tokyo → 東京\nOpenAI → OpenAI\nMachine Learning -> Apprentissage automatique",
+        help="Une entrée par ligne. Format : terme source → terme cible (ou ->).",
+    )
+
 # ── Zone principale ──
 
 st.title("📄 Lumon The Scrib")
@@ -504,60 +875,136 @@ if uploaded_file and selected_model and src_lang != tgt_lang:
     col2.metric("Caractères", f"{len(source_text):,}")
     col3.metric("Tokens (est.)", f"{source_tokens:,}")
 
+    # ── Fix #4 : Avertissement tokenizer approximatif ──
+    st.caption(
+        "⚠️ Estimation via **cl100k_base** (GPT-4). Le tokenizer HY-MT peut "
+        "donner un comptage différent de ±15 %. La taille réelle des chunks "
+        "envoyés au modèle peut varier."
+    )
+
     st.divider()
 
-    # Session state
+    # ── Fix #3 : Clés de session state pour résultat + cache ──
     state_key = f"result_{uploaded_file.name}_{uploaded_file.size}_{src_lang}_{tgt_lang}"
+    cache_key = f"cache_{uploaded_file.name}_{uploaded_file.size}_{src_lang}_{tgt_lang}"
     if state_key not in st.session_state:
         st.session_state[state_key] = None
+    if cache_key not in st.session_state:
+        st.session_state[cache_key] = {}
 
-    # Bouton de traduction
-    if st.button("🚀 Lancer la traduction", type="primary", use_container_width=True):
+    cache: dict[int, str] = st.session_state[cache_key]
+
+    # Boutons d'action
+    btn_col1, btn_col2 = st.columns([3, 1])
+    launch = btn_col1.button(
+        "🚀 Lancer la traduction", type="primary", use_container_width=True,
+    )
+    if cache:
+        if btn_col2.button("🗑️ Vider le cache", use_container_width=True):
+            st.session_state[cache_key] = {}
+            st.session_state[state_key] = None
+            cache = {}
+            st.rerun()
+
+    if launch:
         start_time = time.time()
+
+        # ── Fix #7 : Initialiser le glossaire ──
+        glossary_key = f"glossary_{uploaded_file.name}_{uploaded_file.size}_{src_lang}_{tgt_lang}"
+        if glossary_key not in st.session_state:
+            st.session_state[glossary_key] = {}
+        auto_glossary: dict[str, str] = st.session_state[glossary_key]
+
+        # Parser le glossaire manuel
+        manual_glossary = {}
+        if manual_glossary_text.strip():
+            manual_glossary = parse_manual_glossary(manual_glossary_text)
+
+        # Fusionner : le manuel a priorité sur l'automatique
+        combined_glossary = {**auto_glossary, **manual_glossary}
 
         # Découpage
         with st.spinner("Découpage du document..."):
             chunks = split_markdown(source_text, max_chunk_tokens)
 
         total_chunks = len(chunks)
-        translatable = sum(1 for c in chunks if not is_code_block(c) and not is_front_matter(c))
-        st.info(
+        translatable = sum(1 for t, _ in chunks if is_translatable(t))
+        cached_count = sum(1 for i, (t, _) in enumerate(chunks) if is_translatable(t) and i in cache)
+        to_translate = translatable - cached_count
+
+        info_msg = (
             f"Document découpé en **{total_chunks} blocs** "
             f"({translatable} à traduire, {total_chunks - translatable} conservés tels quels)"
         )
+        if cached_count > 0:
+            info_msg += f" — **{cached_count} blocs en cache**, {to_translate} restant(s)."
+        if combined_glossary:
+            info_msg += f" — 📖 {len(combined_glossary)} terme(s) dans le glossaire."
+        st.info(info_msg)
 
         # Traduction
         progress_bar = st.progress(0, text="Démarrage...")
-        translated_chunks: list[str] = []
+        translated_parts: list[tuple[str, str]] = []
         error_occurred = False
+        quality_warnings: list[str] = []
 
-        for i, chunk in enumerate(chunks):
+        for i, (chunk_type, chunk_text) in enumerate(chunks):
             progress_bar.progress(
                 i / total_chunks,
                 text=f"Bloc {i + 1}/{total_chunks}...",
             )
 
-            # Ne pas traduire les blocs de code et le front matter
-            if is_code_block(chunk) or is_front_matter(chunk):
-                translated_chunks.append(chunk)
+            # Blocs non-traduisibles (code, front_matter, sep)
+            if not is_translatable(chunk_type):
+                translated_parts.append((chunk_type, chunk_text))
                 continue
 
+            # ── Fix #3 : vérifier le cache ──
+            if i in cache:
+                translated_parts.append(("text", cache[i]))
+                continue
+
+            # Préparer le glossaire pour ce chunk (actif si glossaire_enabled)
+            chunk_glossary = combined_glossary if glossary_enabled else manual_glossary
+
             result = translate_with_retry(
-                chunk, backend_url, selected_model,
+                chunk_text, backend_url, selected_model,
                 src_lang, tgt_lang,
                 temperature, top_k, top_p, repetition_penalty,
                 max_response_tokens, request_timeout,
+                backend_name,
+                glossary=chunk_glossary if chunk_glossary else None,
             )
             if result is None:
                 error_occurred = True
-                st.error(f"Erreur au bloc {i + 1}/{total_chunks}. Traduction interrompue.")
+                st.error(
+                    f"❌ Erreur au bloc {i + 1}/{total_chunks}. "
+                    f"**{len(cache)} blocs en cache** — recliquez pour reprendre."
+                )
                 break
-            translated_chunks.append(result)
+
+            # Stocker immédiatement en cache
+            cache[i] = result
+
+            # ── Fix #7 : Mettre à jour le glossaire automatique ──
+            if glossary_enabled:
+                align_glossary_from_chunks(chunk_text, result, auto_glossary)
+                # Mettre à jour le glossaire combiné pour les blocs suivants
+                combined_glossary = {**auto_glossary, **manual_glossary}
+
+            # ── Fix #5 : valider la qualité ──
+            chunk_warnings = validate_translation(chunk_text, result)
+            for w in chunk_warnings:
+                quality_warnings.append(f"Bloc {i + 1} : {w}")
+
+            translated_parts.append(("text", result))
 
         if not error_occurred:
             progress_bar.progress(1.0, text="Terminé !")
             elapsed = time.time() - start_time
-            result_text = "\n\n".join(translated_chunks)
+
+            # ── Fix #2 : jointure fidèle avec séparateurs originaux ──
+            result_text = "".join(content for _, content in translated_parts)
 
             st.session_state[state_key] = result_text
             st.success(
@@ -565,6 +1012,15 @@ if uploaded_file and selected_model and src_lang != tgt_lang:
                 f"({translatable} blocs traduits, "
                 f"~{len(encoding.encode(result_text)):,} tokens)"
             )
+
+            # Afficher les warnings qualité s'il y en a
+            if quality_warnings:
+                with st.expander(
+                    f"⚠️ {len(quality_warnings)} avertissement(s) qualité",
+                    expanded=False,
+                ):
+                    for w in quality_warnings:
+                        st.warning(w)
 
     # Affichage du résultat
     result_text = st.session_state.get(state_key)

@@ -1031,14 +1031,68 @@ if uploaded_file and selected_model and src_lang != tgt_lang:
         with tab_preview:
             st.markdown(result_text)
         with tab_raw:
-            st.code(result_text, language="markdown")
+            st.text_area(
+                "Résultat brut",
+                value=result_text,
+                height=400,
+                label_visibility="collapsed",
+                key=f"raw_{state_key}",
+            )
+            # Bouton copier via JavaScript (le bouton natif de st.code
+            # est cassé dans Streamlit ≥ 1.30 : rendu hors écran)
+            import streamlit.components.v1 as components
+            _escaped = result_text.replace("\\", "\\\\").replace("`", "\\`").replace("$", "\\$")
+            components.html(
+                f"""
+                <button onclick="copyToClipboard()" id="copyBtn"
+                  style="
+                    background: #262730; color: #fafafa; border: 1px solid #4a4a5a;
+                    padding: 0.4rem 1rem; border-radius: 0.5rem; cursor: pointer;
+                    font-size: 0.85rem; transition: all 0.2s;
+                  "
+                  onmouseover="this.style.background='#3a3a4a'"
+                  onmouseout="this.style.background='#262730'"
+                >📋 Copier le résultat brut</button>
+                <script>
+                function copyToClipboard() {{
+                    const text = `{_escaped}`;
+                    navigator.clipboard.writeText(text).then(() => {{
+                        const btn = document.getElementById('copyBtn');
+                        btn.textContent = '✅ Copié !';
+                        setTimeout(() => {{ btn.textContent = '📋 Copier le résultat brut'; }}, 2000);
+                    }}).catch(() => {{
+                        // Fallback pour les contextes non-sécurisés (HTTP)
+                        const ta = document.createElement('textarea');
+                        ta.value = text;
+                        ta.style.position = 'fixed';
+                        ta.style.left = '-9999px';
+                        document.body.appendChild(ta);
+                        ta.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(ta);
+                        const btn = document.getElementById('copyBtn');
+                        btn.textContent = '✅ Copié !';
+                        setTimeout(() => {{ btn.textContent = '📋 Copier le résultat brut'; }}, 2000);
+                    }});
+                }}
+                </script>
+                """,
+                height=50,
+            )
 
+        # ── Téléchargement : BytesIO stable pour éviter les .crdownload ──
+        import io
+        _dl_bytes = result_text.encode("utf-8")
+        _dl_buffer = io.BytesIO(_dl_bytes)
+        _dl_buffer.name = f"traduit_{uploaded_file.name}"
+        _dl_filename = f"traduit_{uploaded_file.name}"
         st.download_button(
-            label="📥 Télécharger le fichier traduit",
-            data=result_text.encode("utf-8"),
-            file_name=f"traduit_{uploaded_file.name}",
+            label="📥 Télécharger le fichier traduit (.md)",
+            data=_dl_buffer,
+            file_name=_dl_filename,
             mime="text/markdown",
             use_container_width=True,
+            key=f"dl_{state_key}",
         )
 
 elif not uploaded_file:

@@ -1,43 +1,39 @@
-# 📄 Lumon The Scrib
+# 📄 Lumon The Scrib v2 — Multimodal Translation Workstation
 
-Traducteur local de gros documents Markdown, propulsé par le modèle [HY-MT (Hunyuan Translation)](https://github.com/Tencent-Hunyuan/HY-MT) de Tencent.
+Traducteur local de gros documents, d'images et de flux caméra, propulsé par les modèles [HY-MT (Hunyuan Translation)](https://github.com/Tencent-Hunyuan/HY-MT) et **GLM-OCR**.
 
-**Traduisez des documents Markdown de plusieurs milliers de pages en local**, sans envoyer vos données sur Internet.
+**Traduisez des documents de plusieurs milliers de pages, des documents scannés ou même des livres physiques via votre webcam, 100% en local.** Vos données ne quittent jamais votre machine.
 
 ---
 
-## ✨ Fonctionnalités
+## ✨ Fonctionnalités (v2)
 
-- **33 langues** supportées (anglais, français, chinois, japonais, arabe, etc.)
-- **Optimisé pour les très gros documents** — Découpage intelligent par state machine, streaming, retry automatique
-- **100 % local** — Vos données ne quittent jamais votre machine
-- **Préservation du Markdown** — Blocs de code, tableaux, front matter YAML conservés intacts
-- **Tableaux atomiques** — Les tableaux Markdown ne sont jamais découpés au milieu
-- **Glossaire terminologique** — Cohérence automatique des noms propres entre les blocs (template HY-MT officiel)
-- **Cache de traduction** — Reprise automatique après échec, sans re-traduire les blocs déjà traités
-- **Validation qualité** — Détection des réponses vides, tronquées ou au ratio suspect
-- **Multi-backend** — Compatible LM Studio et Ollama (payload adapté nativement)
-- **Encodage UTF-8 robuste** — Décodage forcé pour éviter les artefacts sur tous les caractères
-- **Interface simple** — Upload, clic, téléchargement
+### 🚀 Nouveautés de la v2 (Multimodalité & Performance)
+- **Ingestion Universelle de Documents** — Support natif des fichiers `.md`, `.txt`, `.pdf` (avec extraction native ou OCR de secours), `.docx` et images (`.png`, `.jpg`).
+- **OCR Intégré (GLM-OCR)** — Outil de reconnaissance de texte, de tableaux et de formules mathématiques à partir d'images ou de documents scannés.
+- **Caméra en Direct** — Capturez des pages de livres ou de documents via votre webcam, extrayez le texte via OCR et traduisez-le instantanément.
+- **Exports Multi-Formats** — Téléchargez vos traductions en `.md`, `.txt`, `.pdf`, `.html`, ou `.docx`.
+- **Architecture Modulaire** — Codebase refondue pour une meilleure maintenabilité (package `lumon/`).
+- **Optimisations de Vitesse** (Architecture prête) — Pooling de connexions HTTP (exécution 2x plus rapide), max_tokens adaptatif, backoff réduit et support de traduction de blocs en parallèle.
+
+### 🛡️ Moteur de Traduction HY-MT (Hérité et Préservé)
+- **33 langues** supportées (anglais, français, chinois, japonais, arabe, etc.).
+- **Découpage intelligent (State machine)** — Sépare le texte, préserve les blocs de code et le front matter YAML intacts.
+- **Tableaux atomiques** — Les tableaux Markdown ne sont jamais découpés au milieu.
+- **Glossaire terminologique** — Cohérence automatique des noms propres via le template d'intervention HY-MT.
+- **Validation qualité** — Détection des réponses vides, tronquées ou aux hallucinations probables.
+- **Multi-backend** — Compatible **LM Studio** et **Ollama** avec un système unifié de sélection.
 
 ---
 
 ## 📋 Prérequis
 
-| Composant | Version minimale |
+| Composant | Description |
 |---|---|
-| **Python** | 3.10+ |
-| **LM Studio** ou **Ollama** | Dernière version |
-| **Modèle HY-MT** | HY-MT1.5-1.8B ou HY-MT1.5-7B |
-
-### Choix du modèle
-
-| Modèle | RAM requise | Idéal pour |
-|---|---|---|
-| **HY-MT1.5-1.8B-GGUF** | ~2 Go | Machines modestes, traduction rapide |
-| **HY-MT1.5-1.8B** | ~4 Go | Bon compromis vitesse/qualité |
-| **HY-MT1.5-7B-GGUF** | ~6 Go | Meilleure qualité |
-| **HY-MT1.5-7B** | ~14 Go | Qualité maximale (GPU recommandé) |
+| **Python** | 3.10 ou supérieur |
+| **Backend LLM** | LM Studio ou Ollama (au choix) |
+| **Modèle de Traduction** | HY-MT1.5-1.8B ou HY-MT1.5-7B (GGUF ou Ollama) |
+| **Modèle OCR (Vision)** | GLM-OCR (requis pour traduire des images, PDF scannés et caméra) |
 
 ---
 
@@ -50,221 +46,105 @@ git clone <url-du-repo>
 cd lumon-the-scrib
 ```
 
-### 2. Installer un backend LLM
+### 2. Installer les backends et modèles
 
-Vous avez le choix entre **LM Studio** ou **Ollama**. Installez l'un des deux.
+Vous pouvez utiliser Ollama, LM Studio, ou les deux.
 
-#### Option A : LM Studio (recommandé pour débutants)
+#### Option A : LM Studio (Traduction & OCR via vision API)
+1. Téléchargez LM Studio sur [lmstudio.ai](https://lmstudio.ai).
+2. Cherchez et téléchargez `HY-MT1.5` (ex: `HY-MT1.5-1.8B-GGUF`).
+3. Cherchez et téléchargez `GLM-OCR` (ou un modèle Vision performant équivalent).
+4. Chargez les modèles en mémoire et démarrez le serveur local (onglet **Developer** `<>`). Le serveur tourne généralement sur `http://localhost:1234`.
 
-1. **Télécharger** LM Studio depuis [lmstudio.ai](https://lmstudio.ai)
-2. **Installer** et lancer l'application
-3. **Chercher le modèle** : dans la barre de recherche, tapez `HY-MT1.5`
-4. **Télécharger** le modèle souhaité (ex: `HY-MT1.5-1.8B-GGUF`)
-5. **Charger le modèle** : cliquez dessus pour le charger en mémoire
-6. **Démarrer le serveur** :
-   - Allez dans l'onglet **"Developer"** (icône `<>`)
-   - Cliquez sur **"Start Server"**
-   - Le serveur démarre sur `http://localhost:1234`
-
-> 💡 Le serveur LM Studio doit rester ouvert pendant toute l'utilisation de l'app.
-
-#### Option B : Ollama
-
-1. **Installer** Ollama depuis [ollama.com](https://ollama.com)
-2. **Télécharger le modèle** :
-
+#### Option B : Ollama (Traduction & OCR natif)
+1. Installez Ollama depuis [ollama.com](https://ollama.com).
+2. Téléchargez les modèles nécessaires :
 ```bash
 ollama pull hf.co/tencent/HY-MT1.5-1.8B-GGUF
+ollama pull glm-ocr:latest
 ```
-
-3. **Vérifier** que le modèle est bien installé :
-
-```bash
-ollama list
-```
-
-Le serveur Ollama écoute par défaut sur `http://localhost:11434`.
-
-> 📝 L'application adapte automatiquement le format de requête pour Ollama (les paramètres `top_k` et `repeat_penalty` sont transmis dans l'objet `options` conformément à l'API Ollama).
 
 ---
 
 ## ▶️ Lancement
 
-Une seule commande :
+Une seule commande gère l'installation des dépendances (PyMuPDF, python-docx, Pillow, fpdf2, markdown...) et lance l'app :
 
 ```bash
 ./run.sh
 ```
 
-Le script vérifie automatiquement les dépendances Python, les installe si nécessaire, et lance l'application.
-
-> 💡 **Alternative manuelle** :
-> ```bash
-> pip3 install -r requirements.txt
-> python3 -m streamlit run traduction_app.py
-> ```
-
-L'application s'ouvre dans votre navigateur à l'adresse `http://localhost:8501`.
+L'application s'ouvrira dans votre navigateur à l'adresse `http://localhost:8501`.
 
 ---
 
-## 📖 Utilisation
+## 📖 Utilisation détaillée
 
-### 1. Configurer le backend (sidebar gauche)
+L'interface est découpée en **4 onglets principaux** :
 
-- **Backend LLM** : Sélectionnez `LM Studio` ou `Ollama`
-- **URL du serveur** : Laissez la valeur par défaut sauf port personnalisé
-- **Modèle** : Détecté automatiquement si le backend tourne. Sinon, saisie manuelle.
+### 1. 📄 Texte / Markdown
+Le mode original de Lumon The Scrib. Collez du texte brut ou importez un fichier `.md`/`.txt`. Idéal pour les traductions ultra-rapides et fidèles au format.
 
-### 2. Choisir les langues
+### 2. 📑 Documents (PDF, DOCX, Images)
+Importez vos documents complexes.
+- Les **DOCX** verront leurs titres et tableaux extraits.
+- Les **PDF textuels** sont extraits directement.
+- Les **PDF scannés** ou les **Images** font appel à **GLM-OCR**. Vous pouvez choisir le prompt OCR désiré dans la barre latérale (Texte régulier, Extraction de tableaux, Préservation de requêtes mathématiques).
 
-- **Langue source** : La langue du document original
-- **Langue cible** : La langue de destination
+### 3. 📷 Caméra
+Utilisez la webcam de votre ordinateur pour traduire en direct.
+- Prenez une photo d'une page physique.
+- GLM-OCR en extrait le texte.
+- HY-MT traduit le tout, tout en lissant les erreurs typographiques de l'OCR.
 
-### 3. Configurer le glossaire (optionnel)
+### 4. ℹ️ À Propos
+Pour consulter les aides en ligne, la documentation de HY-MT et voir les optimisations système.
 
-Dans la sidebar, section **"📖 Glossaire"** :
-
-- **Glossaire automatique** (activé par défaut) — L'app détecte les noms propres dans chaque bloc traduit et les injecte dans les prompts suivants via le [template terminologique HY-MT](HY-MT_MODEL_DOC.md). Cela assure la cohérence des noms propres entre les blocs (ex: un personnage, une entreprise).
-
-- **Glossaire personnalisé** — Saisissez des termes manuellement, un par ligne :
-  ```
-  Tokyo → 東京
-  OpenAI → OpenAI
-  Machine Learning -> Apprentissage automatique
-  ```
-  Le glossaire manuel a **priorité** sur l'automatique.
-
-> 📝 L'extraction automatique fonctionne bien pour les langues latines (FR, EN, ES, DE…). Pour les langues sans majuscules (ZH, JA, KO), utilisez le glossaire manuel.
-
-### 4. Charger et traduire
-
-1. Cliquez sur **"Browse files"** ou glissez-déposez votre fichier `.md`
-2. Cliquez sur **🚀 Lancer la traduction**
-3. La barre de progression montre l'avancement bloc par bloc
-
-Les éléments suivants sont automatiquement préservés sans traduction :
-- **Blocs de code** (``` et ~~~, y compris imbriqués)
-- **Front matter YAML** (`---`)
-
-Les **tableaux Markdown** sont traduits en bloc complet (jamais découpés au milieu).
-
-### 5. Reprise après erreur
-
-Si la traduction échoue au bloc N, les blocs déjà traduits sont **mis en cache automatiquement**. Cliquez à nouveau sur **🚀 Lancer la traduction** pour reprendre là où vous vous êtes arrêté.
-
-- Le message d'erreur indique le nombre de blocs en cache
-- Le bouton **🗑️ Vider le cache** permet de forcer une re-traduction complète
-
-### 6. Vérifier la qualité
-
-Après la traduction, l'app affiche automatiquement les **avertissements qualité** (si applicable) :
-
-| Avertissement | Signification |
-|---|---|
-| ⚠️ Réponse vide | Le modèle n'a produit aucun texte |
-| ⚠️ Ratio très bas (< 20 %) | Traduction potentiellement tronquée |
-| ⚠️ Ratio très élevé (> 500 %) | Hallucination probable |
-| ⚠️ Pas de ponctuation finale | Possible troncature (`max_new_tokens` atteint) |
-
-### 7. Récupérer le résultat
-
-- **Aperçu Markdown** — Visualisez le rendu final
-- **Texte brut** — Voyez le code Markdown source
-- **📥 Télécharger** — Sauvegardez le fichier traduit
+### 🔧 Rendu et Exports
+Une fois la traduction achevée, l'interface affiche une progression détaillée, et vous permet d'exporter la traduction en un clic vers :
+- **Markdown (.md)**
+- **Texte brut (.txt)**
+- **PDF (.pdf)** (Généré proprement avec support Unicode et ajustement des marges/tableaux)
+- **HTML (.html)**
+- **Word (.docx)**
 
 ---
 
-## ⚙️ Paramètres avancés
+## ⚙️ Configuration & Performances (Sidebar)
 
-Accessibles dans la sidebar, sous **"🔧 Paramètres avancés"** :
+### Optimisations de Performances
+La sidebar intègre des paramètres de configuration et d'optimisations vitaux :
+- **Choix du Backend et des URL** : Permet de router l'OCR vers Ollama et la Traduction vers LM Studio (ou vice-versa).
+- **Tokens max par bloc** : Ajustable selon la taille de votre contexte.
+- **Réglages du glossaire** : Activer/Désactiver l'extraction automatique des entités nommées.
 
-| Paramètre | Défaut | Description |
-|---|---|---|
-| **Tokens max par bloc** | 1500 | Taille max de chaque chunk envoyé au modèle |
-| **Température** | 0.7 | Créativité. Plus bas = plus littéral |
-| **Top-K** | 20 | Nombre de tokens candidats à chaque étape |
-| **Top-P** | 0.6 | Seuil de probabilité cumulative |
-| **Repetition penalty** | 1.05 | Pénalise les répétitions |
-| **Tokens max par réponse** | 2048 | Longueur max de la réponse par bloc |
-| **Timeout** | 120s | Temps max d'attente par bloc |
-
-> Les valeurs par défaut sont celles **recommandées par la documentation officielle HY-MT**.
-
-> ⚠️ Le comptage de tokens affiché utilise `cl100k_base` (GPT-4). Le tokenizer HY-MT peut donner un résultat différent de ±15 %.
+**Astuces pour accélérer (Tips) :**
+- Utilisez une connexion HTTP persistante avec Ollama (`OLLAMA_KEEP_ALIVE=-1`).
+- Activez **Speculative Decoding** dans LM Studio si disponible (accélère l'inférence de X2).
+- Sur Ollama, lancez `OLLAMA_NUM_PARALLEL=4` pour permettre de multiples requêtes de traduction concurrentes dans le futur mode parallèle.
 
 ---
 
-## 🌍 Langues supportées (33)
+## 📁 Structure du projet (Modulaire)
 
-| Langue | Code | Langue | Code |
-|---|---|---|---|
-| Chinese | `zh` | Polish | `pl` |
-| English | `en` | Czech | `cs` |
-| French | `fr` | Dutch | `nl` |
-| Portuguese | `pt` | Khmer | `km` |
-| Spanish | `es` | Burmese | `my` |
-| Japanese | `ja` | Persian | `fa` |
-| Turkish | `tr` | Gujarati | `gu` |
-| Russian | `ru` | Urdu | `ur` |
-| Arabic | `ar` | Telugu | `te` |
-| Korean | `ko` | Marathi | `mr` |
-| Thai | `th` | Hebrew | `he` |
-| Italian | `it` | Bengali | `bn` |
-| German | `de` | Tamil | `ta` |
-| Vietnamese | `vi` | Ukrainian | `uk` |
-| Malay | `ms` | Tibetan | `bo` |
-| Indonesian | `id` | Kazakh | `kk` |
-| Filipino | `tl` | Mongolian | `mn` |
-| Hindi | `hi` | Uyghur | `ug` |
-| Traditional Chinese | `zh-Hant` | Cantonese | `yue` |
-
----
-
-## 🏗️ Architecture technique
-
-### Découpage intelligent (state machine)
-
-Le document est découpé par une **machine à états ligne par ligne** :
-
-1. **Front matter** détecté et isolé (non traduit)
-2. **Code fences** détectées par type et longueur (gestion des fences imbriquées ``````)
-3. **Tableaux** détectés comme blocs atomiques (lignes `|...|` consécutives, jamais découpés)
-4. **Texte** sous-découpé par paragraphes, avec **séparateurs originaux préservés**
-5. Les chunks sont regroupés en respectant la limite de tokens
-
-### Glossaire terminologique
-
-L'application utilise le **template d'intervention terminologique** de la doc officielle HY-MT :
-
-```
-参考下面的翻译：
-{source_term} 翻译成 {target_term}
-
-将以下文本翻译为{target_language}...
-```
-
-Les noms propres sont extraits par regex heuristique (majuscules latines, mixed-case, all-caps) et le glossaire est filtré pour chaque chunk : seuls les termes présents dans le texte source du chunk sont injectés dans le prompt.
-
-### Payload multi-backend
-
-| Paramètre | LM Studio | Ollama |
-|---|---|---|
-| `top_k` | racine du payload | `options.top_k` |
-| `repetition_penalty` | racine du payload | `options.repeat_penalty` |
-
----
-
-## 📁 Structure du projet
+La V2 introduit un code propre et factorisé (`lumon/`) par rapport au script monolithique de la V1 :
 
 ```
 lumon-the-scrib/
-├── run.sh               # Lanceur (une commande pour tout démarrer)
-├── traduction_app.py    # Application principale (~1000 lignes)
-├── requirements.txt     # Dépendances Python (streamlit, requests, tiktoken)
-├── README.md            # Ce fichier
-└── HY-MT_MODEL_DOC.md   # Documentation officielle du modèle HY-MT
+├── app.py                    # Application Streamlit principale (4 onglets multi-modaux)
+├── run.sh                    # Lanceur auto-installateur
+├── requirements.txt          # Nouvelles dépendances
+├── lumon/
+│   ├── __init__.py
+│   ├── config.py             # Constantes et sélection de backend
+│   ├── translation.py        # Moteur HY-MT avec streaming optimisé
+│   ├── chunking.py           # État de découpe Markdown précis
+│   ├── glossary.py           # Logique d'alignement terminologique
+│   ├── validation.py         # Outils de vérification de qualité
+│   ├── ocr.py                # Wrapper client GLM-OCR (API OpenAI et Ollama)
+│   ├── document.py           # Parsing PDF, DOCX, parsing d'images vers Markdown
+│   └── export.py             # Moteurs de rendu PDF, DOCX, HTML
+└── traduction_app.py         # (Legacy) Version V1 préservée à titre d'archive
 ```
 
 ---
@@ -273,18 +153,12 @@ lumon-the-scrib/
 
 | Problème | Solution |
 |---|---|
-| **"Aucun modèle détecté"** | Vérifiez que votre backend (LM Studio / Ollama) est lancé et qu'un modèle est chargé |
-| **Traduction très lente** | Augmentez le Timeout. Utilisez le modèle `1.8B` au lieu du `7B` |
-| **Le modèle coupe ses réponses** | Réduisez *Tokens max par bloc* (ex: 800). Augmentez *Tokens max par réponse* (ex: 4096) |
-| **Caractères corrompus (脙漏, 芒聙聶)** | Normalement corrigé. Vérifiez les logs `[UTF-8 DEBUG]` dans le terminal |
-| **Traduction interrompue** | Les blocs déjà traduits sont en cache — recliquez sur 🚀 pour reprendre |
-| **Noms propres incohérents** | Ajoutez les termes dans le glossaire personnalisé (sidebar → 📖 Glossaire) |
-| **Tableau cassé** | Les tableaux sont désormais traités comme blocs atomiques : non découpés |
-| **`streamlit` introuvable** | Utilisez `python3 -m streamlit run traduction_app.py` ou `./run.sh` |
-| **L'app ne se lance pas** | Vérifiez Python 3.10+ : `python3 --version`. Réinstallez : `pip3 install -r requirements.txt` |
+| **L'OCR est indisponible** | Vérifiez que GLM-OCR est bien chargé dans Ollama ou LM Studio et que son port correspond dans la barre latérale. |
+| **Crash export PDF sur tableau** | C'est corrigé ! L'export PDF nettoie intelligemment les sauts de lignes des tableaux et redimensionne la largeur effective (`epw`). |
+| **Traduction coupée en plein milieu** | Changez les paramètres avancés de HY-MT (`max_tokens` > 3000) ou baissez les tokens par bloc. Le cache permet de reprendre la traduction à l'endroit bloqué en recliquant sur "Lancer". |
 
 ---
 
 ## 📜 Licence
 
-Ce projet utilise le modèle HY-MT de Tencent. Consultez la [documentation du modèle](HY-MT_MODEL_DOC.md) pour les conditions d'utilisation.
+Lumon The Scrib utilise le framework Streamlit. La logique de validation et de traduction emploie les recommandations du modèle [HY-MT](https://github.com/Tencent-Hunyuan/HY-MT) de Tencent. Documentation du modèle incluse pour référence.

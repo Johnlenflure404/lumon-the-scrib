@@ -1,6 +1,6 @@
 #!/bin/bash
 # ──────────────────────────────────────────────
-# Lanceur HY-MT Traducteur Markdown
+# Lanceur Lumon The Scrib v2
 # Usage : ./run.sh
 # ──────────────────────────────────────────────
 
@@ -9,7 +9,7 @@ set -e
 # Répertoire du script (fonctionne même si lancé depuis un autre dossier)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-echo "📄 Lumon The Scrib"
+echo "📄 Lumon The Scrib v2"
 echo "────────────────────────────"
 
 # Vérifier que Python 3 est installé
@@ -26,4 +26,4 @@ pip3 install -q -r "$SCRIPT_DIR/requirements.txt"
 # Lancer Streamlit
 echo "🚀 Lancement de l'application..."
 echo ""
-python3 -m streamlit run "$SCRIPT_DIR/traduction_app.py"
+python3 -m streamlit run "$SCRIPT_DIR/app.py"
